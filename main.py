@@ -104,7 +104,7 @@ class WalletApp(QMainWindow):
         layout.addWidget(self.subtitle("Đăng nhập để quản lý số dư và xác minh giao dịch bằng chữ ký RSA."))
 
         self.login_user = QLineEdit()
-        self.login_user.setPlaceholderText("Tên đăng nhập")
+        self.login_user.setPlaceholderText("Số tài khoản")
         self.login_pass = QLineEdit()
         self.login_pass.setPlaceholderText("Mật khẩu")
         self.login_pass.setEchoMode(QLineEdit.Password)
@@ -121,22 +121,22 @@ class WalletApp(QMainWindow):
         return page
 
     def login(self):
-        username = self.login_user.text().strip()
+        account_number = self.login_user.text().strip()
         password = self.login_pass.text()
 
-        if not username or not password:
-            QMessageBox.warning(self, "Thiếu thông tin", "Vui lòng nhập tên đăng nhập và mật khẩu.")
+        if not account_number or not password:
+            QMessageBox.warning(self, "Thiếu thông tin", "Vui lòng nhập số tài khoản và mật khẩu.")
             return
 
         conn = get_connection()
         row = conn.execute(
-            "SELECT * FROM users WHERE username=? AND password=?",
-            (username, hash_password(password))
+            "SELECT * FROM users WHERE account_number=? AND password=?",
+            (account_number, hash_password(password))
         ).fetchone()
         conn.close()
 
         if not row:
-            QMessageBox.warning(self, "Đăng nhập thất bại", "Sai tên đăng nhập hoặc mật khẩu.")
+            QMessageBox.warning(self, "Đăng nhập thất bại", "Sai số tài khoản hoặc mật khẩu.")
             return
 
         self.current_user = row
@@ -159,7 +159,7 @@ class WalletApp(QMainWindow):
         layout.addWidget(self.subtitle("Tài khoản mới sẽ được tạo một cặp khóa RSA dùng cho chữ ký số."))
 
         self.reg_user = QLineEdit()
-        self.reg_user.setPlaceholderText("Tên đăng nhập")
+        self.reg_user.setPlaceholderText("Tên hiển thị")
         self.reg_pass = QLineEdit()
         self.reg_pass.setPlaceholderText("Mật khẩu")
         self.reg_pass.setEchoMode(QLineEdit.Password)
@@ -194,18 +194,68 @@ class WalletApp(QMainWindow):
 
         try:
             conn = get_connection()
-            conn.execute(
-                "INSERT INTO users(username,password,private_key,public_key,balance) VALUES(?,?,?,?,?)",
-                (username, hash_password(password), private_key, public_key, 0)
-            )
-            conn.commit()
-            conn.close()
-        except Exception:
-            QMessageBox.warning(self, "Lỗi", "Tên đăng nhập đã tồn tại.")
-            return
 
-        QMessageBox.information(self, "Thành công", "Đã tạo tài khoản và cặp khóa RSA.")
-        self.show_login()
+            # Tạo số tài khoản mới
+            row = conn.execute(
+                """
+                SELECT MAX(CAST(account_number AS INTEGER)) AS max_account
+                FROM users
+                WHERE account_number IS NOT NULL
+                """
+            ).fetchone()
+
+            if row["max_account"] is None:
+                account_number = "10000001"
+            else:
+                account_number = str(row["max_account"] + 1)
+
+            conn.execute(
+                """
+                INSERT INTO users(
+                    account_number,
+                    username,
+                    password,
+                    private_key,
+                    public_key,
+                    balance
+                )
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    account_number,
+                    username,
+                    hash_password(password),
+                    private_key,
+                    public_key,
+                    0
+                )
+            )
+
+            conn.commit()
+
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Lỗi",
+                f"Không thể tạo tài khoản.\n{e}"
+            )
+            return
+        finally:
+            try:
+                conn.close()
+            except:
+                pass
+
+            QMessageBox.information(
+                self,
+                "Thành công",
+                f"Đã tạo tài khoản thành công!\n\n"
+                f"Số tài khoản của bạn: {account_number}\n\n"
+                f"Hãy lưu số tài khoản để đăng nhập."
+            )
+            self.show_login()
+
+      
 
     # ---------- dashboard ----------
     def build_dashboard(self):
@@ -257,7 +307,10 @@ class WalletApp(QMainWindow):
 
     def refresh_dashboard(self):
         self.refresh_current_user()
-        self.welcome.setText(f"Xin chào, {self.current_user['username']} 👋")
+        self.welcome.setText(
+            f"Xin chào, {self.current_user['username']} 👋\n"
+            f"Số tài khoản: {self.current_user['account_number']}"
+        )
         self.balance_label.setText(money(self.current_user["balance"]))
 
     def deposit_dialog(self):
@@ -300,13 +353,13 @@ class WalletApp(QMainWindow):
         root.addWidget(self.subtitle("Phiên giao dịch sẽ được tạo hash SHA-256 và chữ ký RSA trước khi lưu."))
 
         self.receiver = QLineEdit()
-        self.receiver.setPlaceholderText("Tên người nhận")
+        self.receiver.setPlaceholderText("Số tài khoản người nhận")
         self.transfer_amount = QDoubleSpinBox()
         self.transfer_amount.setRange(1, 1000000000)
         self.transfer_amount.setDecimals(0)
         self.transfer_amount.setSuffix(" VNĐ")
 
-        root.addWidget(QLabel("Người nhận"))
+        root.addWidget(QLabel("Số tài khoản người nhận"))
         root.addWidget(self.receiver)
         root.addWidget(QLabel("Số tiền"))
         root.addWidget(self.transfer_amount)
@@ -320,23 +373,23 @@ class WalletApp(QMainWindow):
         return page
 
     def transfer(self):
-        receiver_name = self.receiver.text().strip()
+        receiver_account = self.receiver.text().strip()
         amount = self.transfer_amount.value()
 
-        if not receiver_name:
-            QMessageBox.warning(self, "Thiếu thông tin", "Nhập tên người nhận.")
+        if not receiver_account:
+            QMessageBox.warning(self, "Thiếu thông tin", "Nhập số tài khoản người nhận.")
             return
-        if receiver_name == self.current_user["username"]:
+        if receiver_account == self.current_user["account_number"]:
             QMessageBox.warning(self, "Lỗi", "Không thể chuyển tiền cho chính mình.")
             return
 
         conn = get_connection()
         sender = conn.execute("SELECT * FROM users WHERE id=?", (self.current_user["id"],)).fetchone()
-        receiver = conn.execute("SELECT * FROM users WHERE username=?", (receiver_name,)).fetchone()
+        receiver = conn.execute("SELECT * FROM users WHERE account_number=?", (receiver_account,)).fetchone()
 
         if not receiver:
             conn.close()
-            QMessageBox.warning(self, "Không tìm thấy", "Người nhận không tồn tại.")
+            QMessageBox.warning(self, "Không tìm thấy", "Số tài khoản không tồn tại.")
             return
         if sender["balance"] < amount:
             conn.close()
@@ -374,8 +427,11 @@ class WalletApp(QMainWindow):
         self.refresh_dashboard()
 
         QMessageBox.information(
-            self, "Giao dịch thành công",
-            f"Đã chuyển {money(amount)} cho {receiver_name}.\n\n"
+            self, 
+            "Giao dịch thành công",
+            f"Đã chuyển {money(amount)} cho"
+            f"{receiver['username']}.\n\n"
+            f"Số tài khoản: {receiver_account}\n\n"
             f"SHA-256: {tx_hash[:32]}...\n"
             "RSA Signature: CREATED"
         )
@@ -622,6 +678,18 @@ def apply_style(app):
 
 if __name__ == "__main__":
     init_db()
+    # TEST: thay đổi số tiền giao dịch để kiểm tra chữ ký
+    #conn = get_connection()
+    #cur = conn.cursor()
+
+    #cur.execute("""
+    #    UPDATE transactions
+    #    SET amount = 9000000
+    #    WHERE id = 1
+    #""")
+
+    #conn.commit()
+    #conn.close()
     app = QApplication(sys.argv)
     apply_style(app)
     window = WalletApp()
