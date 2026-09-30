@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QDoubleSpinBox
 )
 
-from database import get_connection, init_db
+from database import get_connection, init_db, show_database
 from crypto_utils import generate_key_pair, hash_transaction, sign_data, verify_signature
 
 
@@ -678,6 +678,8 @@ def apply_style(app):
 
 if __name__ == "__main__":
     init_db()
+
+    show_database()
     # TEST: thay đổi số tiền giao dịch để kiểm tra chữ ký
     #conn = get_connection()
     #cur = conn.cursor()
